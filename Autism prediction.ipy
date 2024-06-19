@@ -1,3 +1,7 @@
+!pip install catboost
+!pip install lightgbm
+!pip install imbalanced-learn
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -6,18 +10,16 @@ from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.metrics import roc_auc_score, confusion_matrix, classification_report
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.svm import SVC
+from lightgbm import LGBMClassifier
+from catboost import CatBoostClassifier
 from imblearn.pipeline import Pipeline
-from imblearn.over_sampling import SMOTEENN
+from imblearn.combine import SMOTEENN
 
-# Load data
 df = pd.read_csv('train.csv')
 
-# Basic EDA
 print(df.info())
 print(df.describe().T)
 
-# Handle missing values
 df = df.replace({'?': np.nan})
 for col in df.columns:
     if df[col].dtype == 'object':
@@ -25,7 +27,7 @@ for col in df.columns:
     else:
         df[col] = df[col].fillna(df[col].median())
 
-# Feature engineering
+
 def convert_age(age):
     if age < 4:
         return 'Toddler'
@@ -41,12 +43,11 @@ def convert_age(age):
 df['ageGroup'] = df['age'].apply(convert_age)
 df['sum_score'] = df.loc[:, 'A1_Score':'A10_Score'].sum(axis=1)
 
-# Encoding categorical variables
 le = LabelEncoder()
 for col in df.select_dtypes(include=['object']):
     df[col] = le.fit_transform(df[col])
 
-# Splitting the data
+
 X = df.drop(['ID', 'Class/ASD'], axis=1)
 y = df['Class/ASD']
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
@@ -58,17 +59,20 @@ pipeline = Pipeline([
     ('classifier', RandomForestClassifier(random_state=42))
 ])
 
-# Define the models to test
+
 models = {
     'RandomForest': (RandomForestClassifier(random_state=42), 
                      {'classifier__n_estimators': [100, 200, 300],
                       'classifier__max_depth': [None, 5, 10]}),
-    'SVM': (SVC(random_state=42, probability=True),
-            {'classifier__C': [0.1, 1, 10],
-             'classifier__kernel': ['rbf', 'linear']})
+    'LightGBM': (LGBMClassifier(random_state=42),
+                 {'classifier__n_estimators': [100, 200, 300],
+                  'classifier__max_depth': [-1, 5, 10]}),
+    'CatBoost': (CatBoostClassifier(random_state=42, verbose=0),
+                 {'classifier__iterations': [100, 200, 300],
+                  'classifier__depth': [4, 6, 8]})
 }
 
-# Train and evaluate models
+
 for name, (model, param_grid) in models.items():
     pipeline.set_params(classifier=model)
     grid_search = GridSearchCV(pipeline, param_grid, cv=5, scoring='roc_auc')
@@ -84,14 +88,12 @@ for name, (model, param_grid) in models.items():
     print("\nClassification Report:")
     print(classification_report(y_test, y_pred))
 
-# Visualize feature importance for the Random Forest model
-if 'RandomForest' in models:
-    rf_model = grid_search.best_estimator_
-    feature_importance = rf_model.named_steps['classifier'].feature_importances_
-    feature_names = X.columns
+best_model = grid_search.best_estimator_
+feature_importance = best_model.named_steps['classifier'].feature_importances_
+feature_names = X.columns
 
-    plt.figure(figsize=(10, 6))
-    sns.barplot(x=feature_importance, y=feature_names, orient='h')
-    plt.title('Feature Importance (Random Forest)')
-    plt.tight_layout()
-    plt.show()
+plt.figure(figsize=(10, 6))
+sns.barplot(x=feature_importance, y=feature_names, orient='h')
+plt.title('Feature Importance')
+plt.tight_layout()
+plt.show()
